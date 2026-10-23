@@ -25,6 +25,23 @@ app.use((_req, res, next) => {
   res.setHeader('Referrer-Policy', 'same-origin');
   next();
 });
+if (process.env.COOKIE_SECURE === '1' && !process.env.TRUST_PROXY) console.warn('TRUST_PROXY non défini derrière HTTPS : le rate-limit verra une seule IP (celle du proxy).');
+// Anti-CSRF : une requête qui modifie l'état doit venir de notre origine (en plus de SameSite=Lax).
+// Les navigateurs envoient toujours Origin sur un POST/PUT ; son absence = client non navigateur (curl…).
+app.use((req, _res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  const origin = req.headers.origin;
+  if (origin) {
+    let host = null;
+    try {
+      host = new URL(origin).host;
+    } catch { /* origine illisible */ }
+    if (host !== req.headers.host) return next(new HttpError(403, 'Origine de la requête refusée.'));
+  } else if (req.headers['sec-fetch-site'] === 'cross-site') {
+    return next(new HttpError(403, 'Origine de la requête refusée.'));
+  }
+  next();
+});
 app.use(express.json({ limit: '1mb' }));
 app.use(loadUser);
 

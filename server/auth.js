@@ -69,12 +69,23 @@ export const requireMember = (req, _res, next) => (req.user?.member ? next() : n
 
 // --- Limiteur de débit en mémoire (anti brute-force) ---
 const hits = new Map();
-export const rateLimit = (name, max, windowMs) => (req, _res, next) => {
-  const key = `${name}:${req.ip}`;
+const WINDOWS = new Map(); // name -> windowMs, pour purger les entrées expirées
+setInterval(() => {
   const now = Date.now();
-  const arr = (hits.get(key) || []).filter((t) => now - t < windowMs);
-  if (arr.length >= max) return next(new HttpError(429, 'Trop de tentatives, réessayez plus tard.'));
-  arr.push(now);
-  hits.set(key, arr);
-  next();
+  for (const [key, arr] of hits) {
+    const win = WINDOWS.get(key.split(':')[0]) || 0;
+    if (!arr.length || now - arr[arr.length - 1] >= win) hits.delete(key);
+  }
+}, 60_000).unref();
+export const rateLimit = (name, max, windowMs) => {
+  WINDOWS.set(name, windowMs);
+  return (req, _res, next) => {
+    const key = `${name}:${req.ip}`;
+    const now = Date.now();
+    const arr = (hits.get(key) || []).filter((t) => now - t < windowMs);
+    if (arr.length >= max) return next(new HttpError(429, 'Trop de tentatives, réessayez plus tard.'));
+    arr.push(now);
+    hits.set(key, arr);
+    next();
+  };
 };
