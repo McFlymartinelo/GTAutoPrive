@@ -1,6 +1,8 @@
 // Calculs financiers et helpers — source unique de vérité pour simulateur, dashboard et clôture admin.
 export const FLAT_TAX = 0.3;
 export const MAX_MEMBERS = 149;
+// Délai pour virer les fonds une fois le financement validé à 100 %.
+export const PLEDGE_PAY_DELAY = '7 jours';
 
 // Statuts
 export const S = {

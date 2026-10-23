@@ -88,7 +88,13 @@ export function LiveProvider({ children, onLogout }) {
         if (a.type === 'ADD_PLEDGE') {
           const r = await api(`/vehicles/${a.vid}/pledge`, { method: 'POST', json: { amount: a.amount } });
           await refresh();
-          notify(r.full ? '⚡ Objectif 100 % atteint ! Convention à signer et virement à effectuer.' : `Promesse de ${eur(r.amount)} enregistrée.`);
+          notify(
+            r.full
+              ? '⚡ Objectif 100 % atteint ! Convention à signer et virement à effectuer.'
+              : r.updated
+                ? `Promesse modifiée : ${eur(r.amount)}.`
+                : `Promesse de ${eur(r.amount)} enregistrée.`,
+          );
           return true;
         }
         const q = toRequest(a);

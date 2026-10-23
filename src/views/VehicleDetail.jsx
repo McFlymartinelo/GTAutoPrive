@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { ArrowLeft, Calendar, Gauge, Fuel, Tag, Info, Lock, AlertTriangle, FileText } from 'lucide-react';
 import { useStore } from '../store.jsx';
 import { Btn, Card, CarImg, Progress, SectionTitle, Input, DlBtn } from '../components/ui.jsx';
+import { useConfirm } from '../components/Confirm.jsx';
 import { StatusBadge, Anonymized, label } from '../components/vehicle.jsx';
-import { S, eur, eur0, pct, num, funded, remaining, progress, pledgeOf, simulate, poolOf, repartition } from '../lib/calc.js';
+import { S, eur, eur0, pct, num, funded, remaining, progress, pledgeOf, simulate, poolOf, repartition, r2, PLEDGE_PAY_DELAY } from '../lib/calc.js';
 import { downloadFactures, downloadFactureVente } from '../lib/docs.js';
 
 const Row = ({ k, v, strong, accent, sub }) => (
@@ -41,17 +42,40 @@ function Simulator({ v, amount, setAmount, max }) {
 
 export default function VehicleDetail({ id }) {
   const { state, dispatch, me } = useStore();
+  const [ask, confirmNode] = useConfirm();
   const v = state.vehicles.find((x) => x.id === id);
   const [img, setImg] = useState(0);
   const mine = v && pledgeOf(v, me.id);
   const rest = v ? remaining(v) : 0;
+  const room = rest + (mine?.amount || 0);
   const [amount, setAmount] = useState(() => (mine ? mine.amount : Math.min(1000, rest || v.prixAchat)));
   if (!v) return null;
-  const pledgeAmt = Math.min(amount, rest);
-  const simMax = v.status === S.FIN ? rest : v.prixAchat;
-  const simAmount = Math.min(amount, simMax);
+  const pledgeAmt = Math.min(Math.max(0, amount || 0), room);
+  const unchanged = !!mine && r2(pledgeAmt) === r2(mine.amount);
+  const simMax = v.status === S.FIN ? room : v.prixAchat;
+  const simAmount = Math.min(amount || 0, simMax);
   const goDash = () => dispatch({ type: 'ROUTE', route: { name: 'dashboard' } });
   const mineRep = v.status === S.VENDU && mine ? repartition(v).find((r) => r.uid === me.id) : null;
+  const commit = async () => {
+    if (!(pledgeAmt > 0) || unchanged) return;
+    const ok = await ask({
+      title: mine ? 'Modifier votre promesse ?' : 'Confirmer votre promesse ?',
+      confirmLabel: mine ? 'Oui, modifier' : 'Oui, je m’engage',
+      body: (
+        <>
+          <p>
+            {mine ? (
+              <>Votre promesse pour <b className="text-white">{label(v)}</b> passera de <b className="text-white">{eur0(mine.amount)}</b> à <b className="text-white">{eur0(pledgeAmt)}</b>.</>
+            ) : (
+              <>Vous vous apprêtez à promettre <b className="text-white">{eur0(pledgeAmt)}</b> pour <b className="text-white">{label(v)}</b>.</>
+            )}
+          </p>
+          <p>En acceptant, vous vous engagez à virer cette somme sous {PLEDGE_PAY_DELAY} une fois le financement validé à 100 %.</p>
+        </>
+      ),
+    });
+    if (ok) dispatch({ type: 'ADD_PLEDGE', vid: v.id, uid: me.id, amount: pledgeAmt });
+  };
 
   return (
     <div className="space-y-6">
@@ -114,13 +138,23 @@ export default function VehicleDetail({ id }) {
                     </div>
                   ) : (
                     <>
-                      {mine && <p className="mb-2 text-sm text-zinc-400">Votre promesse actuelle : <b className="text-white">{eur0(mine.amount)}</b>. Vous pouvez l’augmenter.</p>}
-                      <p className="mb-3 text-sm text-zinc-400">Montant à promettre (plafonné au reste à financer : <b className="text-white">{eur0(rest)}</b>) — ajustez-le dans le simulateur.</p>
+                      {mine ? (
+                        <p className="mb-2 text-sm text-zinc-400">Votre promesse actuelle : <b className="text-white">{eur0(mine.amount)}</b>. Vous pouvez en modifier le montant, pas en enregistrer une seconde.</p>
+                      ) : (
+                        <p className="mb-2 text-sm text-zinc-400">Une seule promesse par véhicule. Vous pourrez ensuite en modifier le montant.</p>
+                      )}
+                      <p className="mb-3 text-sm text-zinc-400">
+                        Montant {mine ? 'de votre promesse' : 'à promettre'} (plafond : <b className="text-white">{eur0(room)}</b>) — ajustez-le dans le simulateur.
+                      </p>
+                      <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-100">
+                        <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                        <p>En acceptant cette promesse, vous vous engagez à virer le montant sous <b>{PLEDGE_PAY_DELAY}</b> une fois le financement validé à 100 %.</p>
+                      </div>
                       <div className="flex flex-wrap gap-3">
-                        <Btn size="lg" disabled={!(pledgeAmt > 0)} onClick={() => dispatch({ type: 'ADD_PLEDGE', vid: v.id, uid: me.id, amount: pledgeAmt })}>
-                          Promettre {eur0(pledgeAmt)}
+                        <Btn size="lg" disabled={!(pledgeAmt > 0) || unchanged} onClick={commit}>
+                          {mine ? `Modifier ma promesse (${eur0(pledgeAmt)})` : `Promettre ${eur0(pledgeAmt)}`}
                         </Btn>
-                        <Btn variant="outline" size="lg" onClick={() => setAmount(rest)}>Tout le reste</Btn>
+                        <Btn variant="outline" size="lg" onClick={() => setAmount(room)}>Tout le reste</Btn>
                       </div>
                     </>
                   )}
@@ -179,6 +213,7 @@ export default function VehicleDetail({ id }) {
 
         <Simulator v={v.status === S.VENDU ? { ...v, margeVisee: v.margeFinale } : v} amount={simAmount} setAmount={setAmount} max={simMax} />
       </div>
+      {confirmNode}
     </div>
   );
 }

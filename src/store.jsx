@@ -43,11 +43,12 @@ function reducer(s, a) {
     case 'ADD_PLEDGE': {
       const v = s.vehicles.find((x) => x.id === a.vid);
       if (!v || v.status !== S.FIN) return s;
-      const amt = r2(Math.min(a.amount, remaining(v)));
-      if (!(amt > 0)) return s;
-      const exists = v.pledges.some((p) => p.uid === a.uid);
-      const pledges = exists
-        ? v.pledges.map((p) => (p.uid === a.uid ? { ...p, amount: r2(p.amount + amt) } : p))
+      const mine = v.pledges.find((p) => p.uid === a.uid);
+      const cap = remaining(v) + (mine?.amount || 0);
+      const amt = r2(Math.min(a.amount, cap));
+      if (!(amt > 0) || (mine && amt === mine.amount)) return s;
+      const pledges = mine
+        ? v.pledges.map((p) => (p.uid === a.uid ? { ...p, amount: amt } : p))
         : [...v.pledges, { uid: a.uid, amount: amt, contractSigned: false, signedAt: null, payment: 'EN_ATTENTE' }];
       const nv = { ...v, pledges };
       const full = funded(nv) >= v.prixAchat;
@@ -57,7 +58,9 @@ function reducer(s, a) {
         next,
         full
           ? `⚡ Objectif 100 % atteint pour ${v.marque} ${v.modele} ! Convention à signer et virement à effectuer.`
-          : `Promesse de ${eur(amt)} enregistrée.`,
+          : mine
+            ? `Promesse modifiée : ${eur(amt)}.`
+            : `Promesse de ${eur(amt)} enregistrée.`,
       );
     }
     case 'SIGN_CONVENTION':

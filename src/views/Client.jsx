@@ -37,7 +37,7 @@ export default function Client() {
         </div>
       </div>
       {route.name === 'showroom' && <Showroom />}
-      {route.name === 'vehicle' && <VehicleDetail id={route.id} />}
+      {route.name === 'vehicle' && <VehicleDetail key={route.id} id={route.id} />}
       {route.name === 'dashboard' && <Dashboard />}
     </main>
   );

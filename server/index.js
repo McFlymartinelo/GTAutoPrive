@@ -248,14 +248,17 @@ api.post('/vehicles/:id/pledge', requireMember, h(async (req, res) => {
   const result = tx(() => {
     const v = vehicleRow(req.params.id);
     if (v.status !== S.FIN) throw new HttpError(409, 'Ce véhicule n’est plus ouvert aux promesses.');
+    const existing = db.prepare('SELECT amount FROM pledges WHERE vehicle_id = ? AND member_id = ?').get(v.id, m.id);
     const rest = v.prix_achat - fundedCents(v.id);
-    const amt = Math.min(asked, rest);
+    const cap = existing ? rest + existing.amount : rest;
+    const amt = Math.min(asked, cap);
     if (amt <= 0) throw new HttpError(409, 'Financement déjà complet.');
-    db.prepare(`INSERT INTO pledges (vehicle_id, member_id, amount) VALUES (?,?,?)
-      ON CONFLICT(vehicle_id, member_id) DO UPDATE SET amount = amount + excluded.amount`).run(v.id, m.id, amt);
+    if (existing && amt === existing.amount) throw new HttpError(409, 'Vous avez déjà une promesse de ce montant. Vous pouvez la modifier.');
+    if (existing) db.prepare('UPDATE pledges SET amount = ? WHERE vehicle_id = ? AND member_id = ?').run(amt, v.id, m.id);
+    else db.prepare('INSERT INTO pledges (vehicle_id, member_id, amount) VALUES (?,?,?)').run(v.id, m.id, amt);
     const full = fundedCents(v.id) >= v.prix_achat;
     if (full) db.prepare('UPDATE vehicles SET status = ? WHERE id = ?').run(S.F100, v.id);
-    return { amount: amt / 100, full };
+    return { amount: amt / 100, full, updated: !!existing };
   });
   audit(req.user.id, 'pledge', `${req.params.id} ${result.amount}`);
   res.json(result);
