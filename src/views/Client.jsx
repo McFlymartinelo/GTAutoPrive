@@ -29,7 +29,7 @@ export default function Client() {
         </nav>
         <div className="flex items-center gap-3 text-sm text-zinc-400">
           <span>Investisseur <b className="text-gold-300">#{me.num}</b> · {me.prenom} {me.nom}</span>
-          {me.id !== 'm12' && (
+          {me.id !== 'm12' && !state.live && (
             <button onClick={() => dispatch({ type: 'SET_USER', id: 'm12' })} className="flex items-center gap-1 text-xs text-zinc-500 hover:text-white">
               <RotateCcw size={12} /> Compte démo
             </button>

@@ -37,6 +37,7 @@ export default function App() {
                 <t.icon size={14} /> {t.label}
               </button>
             ))}
+            <a href="#" onClick={() => { location.hash = ''; }} className="shrink-0 px-2 py-1.5 text-xs text-gold-300 hover:underline">Quitter la démo</a>
             <button onClick={() => dispatch({ type: 'RESET' })} className="shrink-0 px-2 text-xs text-zinc-500 hover:text-zinc-300" title="Réinitialiser les données de démonstration">
               Reset
             </button>

@@ -58,10 +58,10 @@ function CloseModal({ v, onClose }) {
   const tot = (k) => rows.reduce((s, r) => s + r[k], 0);
   const ok = +prix > 0 && marge !== '' && fact && vente;
 
-  const submit = () => {
+  const submit = async () => {
     const doc = (f) => ({ name: f.name, url: URL.createObjectURL(f) });
-    dispatch({ type: 'CLOSE_VEHICLE', vid: v.id, prixVenteReel: +prix, margeFinale: +marge, docs: { factures: doc(fact), vente: doc(vente) } });
-    onClose();
+    const res = await dispatch({ type: 'CLOSE_VEHICLE', vid: v.id, prixVenteReel: +prix, margeFinale: +marge, docs: { factures: doc(fact), vente: doc(vente) }, files: { factures: fact, vente } });
+    if (res !== false) onClose();
   };
 
   return (

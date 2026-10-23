@@ -20,7 +20,7 @@ function Members() {
   const KycBtns = ({ m }) => (
     <div className="flex flex-wrap gap-1.5">
       {[['rib', 'RIB'], ['id', 'ID'], ['domicile', 'Domicile']].map(([k, t]) => (
-        <Btn key={k} variant="outline" size="sm" disabled={!m.kyc?.[k]} onClick={() => setView({ m, name: m.kyc[k], t })}><Eye size={13} /> {t}</Btn>
+        <Btn key={k} variant="outline" size="sm" disabled={!m.kyc?.[k]} onClick={() => setView({ m, name: m.kyc[k], t, url: m.kycUrl?.[k] })}><Eye size={13} /> {t}</Btn>
       ))}
     </div>
   );
@@ -87,7 +87,14 @@ function Members() {
         <div className="rounded-xl border border-dashed border-ink-600 bg-ink-950 p-10 text-center text-sm text-zinc-400">
           <FileCheck2 className="mx-auto mb-3 text-gold-400" size={32} />
           <div className="font-mono text-white">{view?.name}</div>
-          <p className="mt-2 text-xs">Aperçu simulé — branchez ici votre stockage sécurisé (URL signée) pour visualiser la pièce.</p>
+          {view?.url ? (
+            <>
+              {/\.(png|jpe?g|webp)$/i.test(view.name || '') && <img src={view.url} alt={view.t} className="mx-auto mt-4 max-h-80 rounded-lg" />}
+              <a href={view.url} target="_blank" rel="noreferrer" className="mt-4 inline-block rounded-xl bg-gold-400 px-4 py-2 font-semibold text-ink-950">Ouvrir le document</a>
+            </>
+          ) : (
+            <p className="mt-2 text-xs">Aperçu simulé (mode démo).</p>
+          )}
         </div>
       </Modal>
     </div>
@@ -95,32 +102,36 @@ function Members() {
 }
 
 function NewVehicle() {
-  const { dispatch, notify } = useStore();
+  const { dispatch } = useStore();
   const empty = { marque: '', modele: '', finition: '', motorisation: '', annee: '', km: '', prixAchat: '', margeVisee: '', pctRoyalties: '40', infos: '' };
   const [f, setF] = useState(empty);
   const [photos, setPhotos] = useState(['', '', '']);
+  const [photoFiles, setPhotoFiles] = useState([null, null, null]);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const ok = ['marque', 'modele', 'finition', 'motorisation', 'annee', 'km', 'prixAchat', 'margeVisee', 'pctRoyalties'].every((k) => f[k] !== '') && +f.prixAchat > 0 && +f.pctRoyalties <= 100;
 
   const pickFile = (i, file) => {
+    setPhotoFiles((a) => a.map((x, j) => (j === i ? file : x)));
     const r = new FileReader();
     r.onload = () => setPhotos((p) => p.map((x, j) => (j === i ? r.result : x)));
     r.readAsDataURL(file);
   };
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
     const hue = ['#c0392b', '#2f6fdb', '#16a085', '#8e44ad', '#e67e22'][Math.floor(Math.random() * 5)];
-    dispatch({
+    const ok = await dispatch({
       type: 'CREATE_VEHICLE',
       vehicle: {
         ...f, annee: +f.annee, km: +f.km, prixAchat: +f.prixAchat, margeVisee: +f.margeVisee, pctRoyalties: +f.pctRoyalties,
         photos: photos.map((p, i) => p.trim() || carSvg(hue, i)),
+        photoFiles,
       },
     });
+    if (ok === false) return;
     setF(empty);
     setPhotos(['', '', '']);
-    notify('Véhicule ajouté au showroom.');
+    setPhotoFiles([null, null, null]);
   };
 
   return (

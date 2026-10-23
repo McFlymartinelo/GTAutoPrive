@@ -106,7 +106,7 @@ export function clubStats(state) {
   const rotation = sold.length ? sold.reduce((s, v) => s + (v.joursRotation || 0), 0) / sold.length : 0;
   return {
     // Démo : 40 membres historiques + membres actifs présents dans la base de démonstration.
-    membres: 40 + members.filter((m) => m.status === M.ACTIF).length,
+    membres: (state.memberOffset ?? 40) + members.filter((m) => m.status === M.ACTIF).length,
     volume: financed.reduce((s, v) => s + v.prixAchat, 0),
     royalties: sold.reduce((s, v) => s + poolOf(v, v.margeFinale), 0),
     rentab,

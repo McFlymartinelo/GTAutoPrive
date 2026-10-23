@@ -14,7 +14,8 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  if (e.request.method !== 'GET' || !e.request.url.startsWith(self.location.origin)) return;
+  // Ne jamais mettre en cache l'API (données personnelles, sessions).
+  if (e.request.method !== 'GET' || !e.request.url.startsWith(self.location.origin) || new URL(e.request.url).pathname.startsWith('/api/')) return;
   e.respondWith(
     fetch(e.request)
       .then((res) => {

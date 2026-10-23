@@ -44,7 +44,7 @@ function UrgentCard({ v, p, me }) {
             onClose={() => setOpen(false)}
             title={`Convention de revenus futurs — ${label(v)}`}
             text={text}
-            onSigned={() => { dispatch({ type: 'SIGN_CONVENTION', vid: v.id, uid: me.id }); setOpen(false); }}
+            onSigned={async (sig) => { const ok = await dispatch({ type: 'SIGN_CONVENTION', vid: v.id, uid: me.id, signature: sig }); if (ok !== false) setOpen(false); }}
           />
         </div>
 

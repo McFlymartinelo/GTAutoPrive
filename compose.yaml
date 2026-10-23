@@ -1,11 +1,35 @@
 name: ${COMPOSE_PROJECT_NAME}
 
 services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    restart: unless-stopped
+    environment:
+      COOKIE_SECURE: "1"   # HTTPS terminé par Cloudflare
+      TRUST_PROXY: "1"     # un seul saut : nginx
+    volumes:
+      - gtdata:/data       # base club.db + uploads/ (pièces KYC) : à sauvegarder
+    networks:
+      - app
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/api/auth/me || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
   web:
     build:
       context: .
       dockerfile: Dockerfile
+      target: web
     restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
     ports:
       - "127.0.0.1:${WEB_PORT}:80"
     networks:
@@ -16,6 +40,9 @@ services:
       timeout: 5s
       retries: 3
       start_period: 5s
+
+volumes:
+  gtdata:
 
 networks:
   app:

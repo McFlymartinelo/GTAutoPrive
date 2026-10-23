@@ -2,7 +2,7 @@ import { createContext, useContext, useReducer, useMemo } from 'react';
 import { seedState } from './data/seed.js';
 import { S, M, funded, r2, remaining, eur } from './lib/calc.js';
 
-const Ctx = createContext(null);
+export const Ctx = createContext(null);
 
 const toast = (s, msg, kind = 'ok') => ({ ...s, toast: { id: Date.now() + Math.random(), msg, kind } });
 const setVeh = (s, id, fn) => ({ ...s, vehicles: s.vehicles.map((v) => (v.id === id ? fn(v) : v)) });

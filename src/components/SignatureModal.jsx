@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { PenLine, ShieldCheck, Eraser } from 'lucide-react';
 import { Btn, Modal, Input } from './ui.jsx';
+import { useStore } from '../store.jsx';
 
 const DEMO_OTP = '482913';
 
@@ -10,6 +11,9 @@ const DEMO_OTP = '482913';
  * (ex. POST /signature_requests) puis résoudre `onSigned` au retour du webhook.
  */
 export default function SignatureModal({ open, onClose, title, text, onSigned }) {
+  const { state } = useStore();
+  const live = !!state.live;
+  const [pwd, setPwd] = useState('');
   const canvas = useRef(null);
   const drawing = useRef(false);
   const [checked, setChecked] = useState(false);
@@ -23,6 +27,7 @@ export default function SignatureModal({ open, onClose, title, text, onSigned })
       setHasInk(false);
       setOtpSent(false);
       setOtp('');
+      setPwd('');
     }
   }, [open]);
 
@@ -58,9 +63,9 @@ export default function SignatureModal({ open, onClose, title, text, onSigned })
   };
 
   const otpOk = otp === DEMO_OTP;
-  const ready = checked && hasInk && otpOk;
+  const ready = checked && hasInk && (live ? pwd.length > 0 : otpOk);
   const sign = () =>
-    onSigned({ date: new Date().toISOString(), otp: true, image: canvas.current.toDataURL('image/png') });
+    onSigned({ date: new Date().toISOString(), otp: !live, password: pwd, image: canvas.current.toDataURL('image/png') });
 
   return (
     <Modal open={open} onClose={onClose} title={title} wide>
@@ -89,6 +94,15 @@ export default function SignatureModal({ open, onClose, title, text, onSigned })
         className="mb-4 h-32 w-full cursor-crosshair rounded-xl border border-ink-600 bg-ink-800 sm:h-40"
       />
 
+      {live ? (
+        <div className="mb-5 rounded-xl border border-ink-700 bg-ink-800 p-3">
+          <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-zinc-400">
+            <ShieldCheck size={14} className="text-gold-400" /> Confirmez votre identité
+          </div>
+          <Input type="password" value={pwd} onChange={(e) => setPwd(e.target.value)} placeholder="Mot de passe de votre compte" autoComplete="current-password" className="!w-72" />
+          <p className="mt-2 text-xs text-zinc-500">La signature est horodatée et rattachée à votre compte (IP, appareil).</p>
+        </div>
+      ) : (
       <div className="mb-5 rounded-xl border border-ink-700 bg-ink-800 p-3">
         <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-zinc-400">
           <ShieldCheck size={14} className="text-gold-400" /> Validation OTP (simulée)
@@ -104,6 +118,7 @@ export default function SignatureModal({ open, onClose, title, text, onSigned })
           </div>
         )}
       </div>
+      )}
 
       <div className="flex justify-end gap-3">
         <Btn variant="ghost" onClick={onClose}>Annuler</Btn>

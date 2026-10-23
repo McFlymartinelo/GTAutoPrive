@@ -100,7 +100,7 @@ export default function Onboarding() {
               onClose={() => setOpen(false)}
               title="Signature de la Charte"
               text={render(state.templates.charte, charteVars(c))}
-              onSigned={(sig) => { dispatch({ type: 'SIGN_CHARTE', id: c.id, signature: sig }); setOpen(false); }}
+              onSigned={async (sig) => { const ok = await dispatch({ type: 'SIGN_CHARTE', id: c.id, signature: sig }); if (ok !== false) setOpen(false); }}
             />
           </div>
         )}
