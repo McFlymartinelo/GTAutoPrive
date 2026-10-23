@@ -1,17 +1,38 @@
 import { useState } from 'react';
-import { Check, Clock, Banknote, Flag } from 'lucide-react';
+import { Check, Clock, Banknote, Flag, Pencil, Undo2 } from 'lucide-react';
 import { useStore } from '../store.jsx';
 import { Btn, Badge, Card, Field, Input, FileDrop, Modal, Progress, SectionTitle } from '../components/ui.jsx';
+import { useConfirm } from '../components/Confirm.jsx';
+import AdminVehicleEdit from './AdminVehicleEdit.jsx';
 import { StatusBadge, PAYMENT_LABEL, label } from '../components/vehicle.jsx';
 import { S, eur, eur0, pct, funded, progress, repartition, poolOf } from '../lib/calc.js';
 
-function memberName(members, uid) {
+export function memberName(members, uid) {
   const m = members.find((x) => x.id === uid);
-  return m ? `#${m.num} ${m.prenom} ${m.nom}` : uid;
+  return m ? `${m.num != null ? `#${m.num} ` : ''}${m.prenom} ${m.nom}` : uid;
 }
 
 function PledgeTable({ v, members, actions }) {
   const { dispatch } = useStore();
+  const [ask, confirmNode] = useConfirm();
+  const confirmPayment = async (p) => {
+    const who = memberName(members, p.uid);
+    const ok = await ask({
+      title: 'Confirmer la réception du virement ?',
+      body: <p>Vous attestez avoir reçu <b className="text-white">{eur0(p.amount)}</b> de <b className="text-white">{who}</b> sur le compte professionnel ({label(v)}).</p>,
+      confirmLabel: 'Fonds reçus',
+    });
+    if (ok) dispatch({ type: 'CONFIRM_PAYMENT', vid: v.id, uid: p.uid });
+  };
+  const unconfirmPayment = async (p) => {
+    const ok = await ask({
+      title: 'Annuler la confirmation ?',
+      body: <p>La réception de <b className="text-white">{eur0(p.amount)}</b> de {memberName(members, p.uid)} repassera à « virement déclaré ».</p>,
+      confirmLabel: 'Annuler la confirmation',
+      danger: true,
+    });
+    if (ok) dispatch({ type: 'UNCONFIRM_PAYMENT', vid: v.id, uid: p.uid });
+  };
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[720px] text-left text-sm">
@@ -31,10 +52,12 @@ function PledgeTable({ v, members, actions }) {
                     {p.payment === 'RECU' ? <Badge tone="green">Fonds reçus sur compte pro</Badge> : p.payment === 'DECLARE' ? <Badge tone="blue">Virement déclaré par le client</Badge> : <Badge tone="amber">En attente</Badge>}
                   </td>
                   <td className="text-right">
-                    {p.payment !== 'RECU' && (
-                      <Btn variant="success" size="sm" onClick={() => dispatch({ type: 'CONFIRM_PAYMENT', vid: v.id, uid: p.uid })}>
+                    {p.payment !== 'RECU' ? (
+                      <Btn variant="success" size="sm" disabled={!p.contractSigned} title={p.contractSigned ? undefined : 'La convention doit d’abord être signée'} onClick={() => confirmPayment(p)}>
                         <Check size={14} /> Confirmer la réception du virement
                       </Btn>
+                    ) : (
+                      <Btn variant="ghost" size="sm" onClick={() => unconfirmPayment(p)}><Undo2 size={13} /> Annuler</Btn>
                     )}
                   </td>
                 </>
@@ -44,6 +67,7 @@ function PledgeTable({ v, members, actions }) {
           {v.pledges.length === 0 && <tr><td colSpan={6} className="py-4 text-zinc-500">Aucune promesse.</td></tr>}
         </tbody>
       </table>
+      {confirmNode}
     </div>
   );
 }
@@ -58,7 +82,19 @@ function CloseModal({ v, onClose }) {
   const tot = (k) => rows.reduce((s, r) => s + r[k], 0);
   const ok = +prix > 0 && marge !== '' && fact && vente;
 
+  const [ask, confirmNode] = useConfirm();
   const submit = async () => {
+    const yes = await ask({
+      title: 'Clôturer cette opération ?',
+      body: (
+        <>
+          <p>{label(v)} passera en « Vendu » : vente <b className="text-white">{eur0(+prix)}</b>, marge finale <b className="text-white">{eur0(+marge)}</b>, pool royalties {eur(poolOf(v, +marge || 0))}.</p>
+          <p>La répartition sera figée et visible des investisseurs. Cette action ne peut pas être annulée.</p>
+        </>
+      ),
+      confirmLabel: 'Clôturer',
+    });
+    if (!yes) return;
     const doc = (f) => ({ name: f.name, url: URL.createObjectURL(f) });
     const res = await dispatch({ type: 'CLOSE_VEHICLE', vid: v.id, prixVenteReel: +prix, margeFinale: +marge, docs: { factures: doc(fact), vente: doc(vente) }, files: { factures: fact, vente } });
     if (res !== false) onClose();
@@ -97,6 +133,7 @@ function CloseModal({ v, onClose }) {
         <Btn variant="ghost" onClick={onClose}>Annuler</Btn>
         <Btn disabled={!ok} onClick={submit}><Flag size={16} /> Clôturer en « Vendu »</Btn>
       </div>
+      {confirmNode}
     </Modal>
   );
 }
@@ -105,6 +142,16 @@ function Detail({ v }) {
   const { state, dispatch } = useStore();
   const [vente, setVente] = useState('');
   const [closing, setClosing] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [ask, confirmNode] = useConfirm();
+  const commercialise = async () => {
+    const ok = await ask({
+      title: 'Passer en « Commercialisé » ?',
+      body: <p>{label(v)} sera mis en vente avec une valeur de <b className="text-white">{eur0(+vente)}</b>. Les investisseurs verront le changement de statut.</p>,
+      confirmLabel: 'Commercialiser',
+    });
+    if (ok) dispatch({ type: 'MARK_COMMERCIALISE', vid: v.id, valeurVente: +vente });
+  };
   const allOk = v.pledges.length > 0 && v.pledges.every((p) => p.contractSigned && p.payment === 'RECU');
   const signed = v.pledges.filter((p) => p.contractSigned).length;
   const paid = v.pledges.filter((p) => p.payment === 'RECU').length;
@@ -116,8 +163,13 @@ function Detail({ v }) {
           <h3 className="font-display text-xl font-semibold text-white">{label(v)} <span className="text-sm text-zinc-500">{v.id}</span></h3>
           <p className="text-sm text-zinc-400">Achat {eur0(v.prixAchat)} · marge visée {eur0(v.margeVisee)} · royalties {pct(v.pctRoyalties, 0)}</p>
         </div>
-        <StatusBadge status={v.status} />
+        <div className="flex items-center gap-2">
+          <StatusBadge status={v.status} />
+          <Btn variant="outline" size="sm" onClick={() => setEditing(true)}><Pencil size={13} /> Modifier</Btn>
+        </div>
       </div>
+      {editing && <AdminVehicleEdit v={v} onClose={() => setEditing(false)} />}
+      {confirmNode}
 
       {(v.status === S.FIN || v.status === S.F100) && (
         <>
@@ -133,7 +185,7 @@ function Detail({ v }) {
       {v.status === S.F100 && (
         <div className="flex flex-wrap items-end gap-3 border-t border-ink-700 pt-4">
           <Field label="Valeur de vente actuelle (€)"><Input type="number" value={vente} onChange={(e) => setVente(e.target.value)} className="!w-48" /></Field>
-          <Btn disabled={!allOk || !(+vente > 0)} onClick={() => dispatch({ type: 'MARK_COMMERCIALISE', vid: v.id, valeurVente: +vente })}>
+          <Btn disabled={!allOk || !(+vente > 0)} onClick={commercialise}>
             <Banknote size={16} /> Basculer en « Commercialisé »
           </Btn>
           {!allOk && <span className="text-xs text-amber-300">Requiert toutes les conventions signées et tous les virements reçus.</span>}
@@ -169,9 +221,9 @@ function Detail({ v }) {
   );
 }
 
-export default function AdminVehicles() {
+export default function AdminVehicles({ sel: selProp, setSel }) {
   const { state } = useStore();
-  const [sel, setSel] = useState(state.vehicles.find((v) => v.status === S.F100)?.id || state.vehicles[0]?.id);
+  const sel = selProp && state.vehicles.some((x) => x.id === selProp) ? selProp : state.vehicles.find((v) => v.status === S.F100)?.id || state.vehicles[0]?.id;
   const v = state.vehicles.find((x) => x.id === sel);
   const groups = [[S.FIN, 'En financement'], [S.F100, '100 % — paiements'], [S.COM, 'Commercialisés'], [S.VENDU, 'Vendus']];
 

@@ -15,6 +15,18 @@ function toRequest(a) {
       return { ...post(`/vehicles/${a.vid}/sign`, { signature: a.signature.image, password: a.signature.password }), msg: 'Convention signée.' };
     case 'DECLARE_PAYMENT':
       return { ...post(`/vehicles/${a.vid}/declare`), msg: 'Virement déclaré — en attente de validation par l’opérateur.' };
+    case 'UNCONFIRM_PAYMENT':
+      return { ...post(`/admin/vehicles/${a.vid}/unconfirm/${a.uid}`), msg: 'Confirmation de réception annulée.', kind: 'warn' };
+    case 'EDIT_VEHICLE': {
+      const v = a.vehicle;
+      const form = new FormData();
+      ['marque', 'modele', 'finition', 'motorisation', 'annee', 'km', 'prixAchat', 'margeVisee', 'pctRoyalties', 'infos'].forEach((k) => form.append(k, v[k]));
+      [0, 1, 2].forEach((i) => {
+        if (a.photoFiles?.[i]) form.append(`photo${i}`, a.photoFiles[i]);
+        else if (v.photos[i] && v.photos[i] !== a.origPhotos?.[i]) form.append(`photo${i}`, v.photos[i]);
+      });
+      return { method: 'PATCH', path: `/admin/vehicles/${a.vid}`, form, msg: 'Véhicule modifié.' };
+    }
     case 'APPROVE_STEP1':
       return { ...post(`/admin/members/${a.id}/approve`), msg: 'Accès à l’étape 2 autorisé.' };
     case 'REFUSE':

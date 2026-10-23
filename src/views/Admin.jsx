@@ -1,21 +1,29 @@
 import { useState } from 'react';
-import { Users, Car, PlusCircle, Settings, Check, X, Eye, FileCheck2, UserCheck } from 'lucide-react';
+import { Users, Car, PlusCircle, Settings, Check, X, Eye, FileCheck2, UserCheck, LayoutDashboard, Calculator, ScrollText } from 'lucide-react';
 import { useStore } from '../store.jsx';
 import { Btn, Badge, Card, Field, Input, inputCls, FileDrop, Modal, SectionTitle } from '../components/ui.jsx';
 import AdminVehicles from './AdminVehicles.jsx';
-import { M, dateFr } from '../lib/calc.js';
+import AdminTodo, { adminTodo } from './AdminTodo.jsx';
+import AdminSimulator from './AdminSimulator.jsx';
+import AdminAudit from './AdminAudit.jsx';
+import { useConfirm } from '../components/Confirm.jsx';
+import { M, MAX_MEMBERS, dateFr } from '../lib/calc.js';
 import { carSvg } from '../lib/placeholder.js';
 
 const TABS = [
+  ['todo', LayoutDashboard, 'À traiter'],
   ['members', Users, 'Membres & parrainages'],
   ['vehicles', Car, 'Véhicules & virements'],
   ['new', PlusCircle, 'Nouveau véhicule'],
+  ['sim', Calculator, 'Simulateur'],
   ['settings', Settings, 'RIB & modèles'],
+  ['audit', ScrollText, 'Journal', true], // API réelle uniquement
 ];
 
 function Members() {
   const { state, dispatch } = useStore();
   const [view, setView] = useState(null);
+  const [ask, confirmNode] = useConfirm();
   const by = (st) => state.members.filter((m) => st.includes(m.status));
   const KycBtns = ({ m }) => (
     <div className="flex flex-wrap gap-1.5">
@@ -38,8 +46,17 @@ function Members() {
                 <div className="text-xs text-zinc-400">Parrain : <b className="text-gold-300">{m.parrain}</b> · demande du {dateFr(m.createdAt)}</div>
               </div>
               <div className="flex gap-2">
-                <Btn variant="success" size="sm" onClick={() => dispatch({ type: 'APPROVE_STEP1', id: m.id })}><Check size={14} /> Valider vers Étape 2</Btn>
-                <Btn variant="danger" size="sm" onClick={() => dispatch({ type: 'REFUSE', id: m.id })}><X size={14} /> Refuser</Btn>
+                <Btn variant="success" size="sm" onClick={async () => (await ask({
+                  title: 'Valider vers l’étape 2 ?',
+                  body: <p><b className="text-white">{m.prenom} {m.nom}</b> (parrain : {m.parrain}) pourra créer son compte et déposer ses pièces KYC. Chaque validation compte dans la limite de {MAX_MEMBERS} membres.</p>,
+                  confirmLabel: 'Valider',
+                })) && dispatch({ type: 'APPROVE_STEP1', id: m.id })}><Check size={14} /> Valider vers Étape 2</Btn>
+                <Btn variant="danger" size="sm" onClick={async () => (await ask({
+                  title: 'Refuser cette demande ?',
+                  body: <p>La demande de <b className="text-white">{m.prenom} {m.nom}</b> sera refusée. Cette décision ne peut pas être annulée depuis l’application.</p>,
+                  confirmLabel: 'Refuser',
+                  danger: true,
+                })) && dispatch({ type: 'REFUSE', id: m.id })}><X size={14} /> Refuser</Btn>
               </div>
             </Card>
           ))}
@@ -97,6 +114,7 @@ function Members() {
           )}
         </div>
       </Modal>
+      {confirmNode}
     </div>
   );
 }
@@ -203,20 +221,32 @@ function Settings_() {
 }
 
 export default function Admin() {
-  const [tab, setTab] = useState('members');
+  const { state } = useStore();
+  const [tab, setTab] = useState('todo');
+  const [sel, setSel] = useState(null);
+  const t = adminTodo(state);
+  const go = (id, vid) => {
+    if (vid) setSel(vid);
+    setTab(id);
+  };
+  const badge = { todo: t.actionable, members: t.requests.length, vehicles: t.toConfirm.length + t.ready.length + t.toClose.length };
   return (
     <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
       <div className="mb-6 flex gap-1 overflow-x-auto rounded-2xl border border-ink-700 bg-ink-900 p-1">
-        {TABS.map(([id, Icon, text]) => (
+        {TABS.filter(([, , , liveOnly]) => !liveOnly || state.live).map(([id, Icon, text]) => (
           <button key={id} onClick={() => setTab(id)} className={`flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition ${tab === id ? 'bg-ink-700 text-white' : 'text-zinc-400 hover:text-white'}`}>
             <Icon size={16} /> {text}
+            {badge[id] > 0 && <span className="rounded-full bg-gold-400 px-1.5 text-[11px] font-semibold text-ink-950" aria-label={`${badge[id]} à traiter`}>{badge[id]}</span>}
           </button>
         ))}
       </div>
+      {tab === 'todo' && <AdminTodo go={go} />}
       {tab === 'members' && <Members />}
-      {tab === 'vehicles' && <AdminVehicles />}
+      {tab === 'vehicles' && <AdminVehicles sel={sel} setSel={setSel} />}
       {tab === 'new' && <NewVehicle />}
+      {tab === 'sim' && <AdminSimulator />}
       {tab === 'settings' && <Settings_ />}
+      {tab === 'audit' && state.live && <AdminAudit />}
     </main>
   );
 }

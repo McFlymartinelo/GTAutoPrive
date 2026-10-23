@@ -336,10 +336,102 @@ admin.post('/vehicles', upload.fields([0, 1, 2].map((i) => ({ name: `photo${i}`,
 admin.post('/vehicles/:id/confirm/:mid', h(async (req, res) => {
   const v = vehicleRow(req.params.id);
   if (v.status !== S.F100) throw new HttpError(409, 'Le véhicule n’est pas en attente de paiements.');
-  const r = db.prepare('UPDATE pledges SET payment = ? WHERE vehicle_id = ? AND member_id = ?').run('RECU', v.id, req.params.mid);
-  if (!r.changes) throw new HttpError(404, 'Promesse introuvable.');
+  const p = db.prepare('SELECT * FROM pledges WHERE vehicle_id = ? AND member_id = ?').get(v.id, req.params.mid);
+  if (!p) throw new HttpError(404, 'Promesse introuvable.');
+  if (!p.contract_signed) throw new HttpError(409, 'La convention de cet investisseur n’est pas signée : réception non confirmable.');
+  if (p.payment === 'RECU') throw new HttpError(409, 'Réception déjà confirmée.');
+  db.prepare('UPDATE pledges SET payment = ? WHERE vehicle_id = ? AND member_id = ?').run('RECU', v.id, p.member_id);
   audit(req.user.id, 'payment_confirmed', `${v.id} ${req.params.mid}`);
   res.json({ ok: true });
+}));
+
+// Annule une confirmation faite par erreur (tant que le véhicule n'est pas commercialisé).
+admin.post('/vehicles/:id/unconfirm/:mid', h(async (req, res) => {
+  const v = vehicleRow(req.params.id);
+  if (v.status !== S.F100) throw new HttpError(409, 'Annulation impossible : le véhicule n’est plus en attente de paiements.');
+  const r = db.prepare('UPDATE pledges SET payment = ? WHERE vehicle_id = ? AND member_id = ? AND payment = ?').run('DECLARE', v.id, req.params.mid, 'RECU');
+  if (!r.changes) throw new HttpError(409, 'Aucune réception à annuler pour cet investisseur.');
+  audit(req.user.id, 'payment_unconfirmed', `${v.id} ${req.params.mid}`);
+  res.json({ ok: true });
+}));
+
+// Modification d'un véhicule à tout moment. Les champs descriptifs sont toujours modifiables ; les champs
+// financiers sont verrouillés dès qu'ils ont servi de base à des engagements (promesses, conventions signées).
+admin.patch('/vehicles/:id', upload.fields([0, 1, 2].map((i) => ({ name: `photo${i}`, maxCount: 1 }))), h(async (req, res) => {
+  const v = vehicleRow(req.params.id);
+  const b = req.body || {};
+  const given = (k) => b[k] !== undefined && String(b[k]).trim() !== '';
+  const set = {};
+  const diff = (col, val) => {
+    if (val !== v[col]) set[col] = val;
+  };
+  for (const [k, max] of [['marque', 60], ['modele', 60], ['finition', 80], ['motorisation', 80]]) if (given(k)) diff(k, str(b[k], k, max));
+  if (given('annee')) diff('annee', intIn(b.annee, 'année', 1950, 2100));
+  if (given('km')) diff('km', intIn(b.km, 'kilométrage', 0, 2_000_000));
+  if (b.infos !== undefined) diff('infos', String(b.infos).slice(0, 5000));
+
+  const nPledges = db.prepare('SELECT COUNT(*) AS c FROM pledges WHERE vehicle_id = ?').get(v.id).c;
+  const nSigned = db.prepare('SELECT COUNT(*) AS c FROM pledges WHERE vehicle_id = ? AND contract_signed = 1').get(v.id).c;
+  if (given('prixAchat')) {
+    const c = money(b.prixAchat, 'prix d’achat', { min: 1 });
+    if (c !== v.prix_achat) {
+      if (nPledges) throw new HttpError(409, 'Prix d’achat verrouillé : des promesses d’investissement existent déjà.');
+      set.prix_achat = c;
+    }
+  }
+  if (given('margeVisee')) {
+    const c = money(b.margeVisee, 'marge visée');
+    if (c !== v.marge_visee) {
+      if (nSigned) throw new HttpError(409, 'Marge visée verrouillée : des conventions mentionnant cette marge sont déjà signées.');
+      set.marge_visee = c;
+    }
+  }
+  if (given('pctRoyalties')) {
+    const pct = Number(b.pctRoyalties);
+    if (!(pct >= 0 && pct <= 100)) throw new HttpError(400, 'Pourcentage de royalties invalide (0–100).');
+    if (pct !== v.pct_royalties) {
+      if (nSigned) throw new HttpError(409, 'Pourcentage de royalties verrouillé : des conventions sont déjà signées.');
+      set.pct_royalties = pct;
+    }
+  }
+
+  const photos = JSON.parse(v.photos);
+  let photosChanged = false;
+  tx(() => {
+    [0, 1, 2].forEach((i) => {
+      const fid = takeFile(req, `photo${i}`, IMG_ONLY, { vehicleId: v.id, kind: 'photo' });
+      if (fid) {
+        photos[i] = `/api/files/${fid}`;
+        photosChanged = true;
+      } else if (given(`photo${i}`)) {
+        const url = String(b[`photo${i}`]).trim();
+        if (!(/^https?:\/\/\S{1,1000}$/.test(url) || (url.startsWith('data:image/svg+xml,') && url.length < 30_000))) throw new HttpError(400, `Adresse de la photo ${i + 1} invalide.`);
+        if (url !== photos[i]) {
+          photos[i] = url;
+          photosChanged = true;
+        }
+      }
+    });
+    if (photosChanged) set.photos = JSON.stringify(photos);
+    const cols = Object.keys(set);
+    if (cols.length) db.prepare(`UPDATE vehicles SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`).run(...cols.map((c) => set[c]), v.id);
+  });
+  const changed = Object.keys(set);
+  if (changed.length) audit(req.user.id, 'vehicle_updated', `${v.id}: ${changed.join(', ')}`);
+  res.json({ ok: true, changed });
+}));
+
+// Journal d'audit (lecture seule). Les identifiants de membres sont remplacés par des noms lisibles.
+admin.get('/audit', h(async (req, res) => {
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
+  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+  const action = typeof req.query.action === 'string' && req.query.action ? req.query.action : null;
+  const names = new Map(db.prepare('SELECT id, prenom, nom FROM members').all().map((m) => [m.id, `${m.prenom} ${m.nom}`]));
+  const readable = (d) => String(d || '').replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, (id) => names.get(id) || id);
+  const rows = db.prepare(`SELECT a.id, a.ts, a.action, a.detail, u.email FROM audit a LEFT JOIN users u ON u.id = a.user_id
+    WHERE (? IS NULL OR a.action = ?) ORDER BY a.id DESC LIMIT ? OFFSET ?`).all(action, action, limit + 1, offset);
+  const actions = db.prepare('SELECT DISTINCT action FROM audit ORDER BY action').all().map((r) => r.action);
+  res.json({ entries: rows.slice(0, limit).map((r) => ({ id: r.id, ts: r.ts, action: r.action, email: r.email, detail: readable(r.detail) })), hasMore: rows.length > limit, actions });
 }));
 
 admin.post('/vehicles/:id/commercialiser', h(async (req, res) => {

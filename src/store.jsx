@@ -64,6 +64,10 @@ function reducer(s, a) {
       return toast(setVeh(s, a.vid, (v) => setPledge(v, a.uid, { contractSigned: true, signedAt: new Date().toISOString() })), 'Convention signée.');
     case 'DECLARE_PAYMENT':
       return toast(setVeh(s, a.vid, (v) => setPledge(v, a.uid, { payment: 'DECLARE' })), 'Virement déclaré — en attente de validation par l’opérateur.');
+    case 'UNCONFIRM_PAYMENT':
+      return toast(setVeh(s, a.vid, (v) => setPledge(v, a.uid, { payment: 'DECLARE' })), 'Confirmation de réception annulée.', 'warn');
+    case 'EDIT_VEHICLE':
+      return toast(setVeh(s, a.vid, (v) => ({ ...v, ...a.vehicle, photos: a.vehicle.photos.map((p, i) => p || v.photos[i]) })), 'Véhicule modifié.');
     case 'CONFIRM_PAYMENT':
       return toast(setVeh(s, a.vid, (v) => setPledge(v, a.uid, { payment: 'RECU' })), 'Réception du virement confirmée.');
 
