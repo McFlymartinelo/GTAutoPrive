@@ -75,6 +75,17 @@ CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ts TEXT NOT NULL, user_id TEXT, action TEXT NOT NULL, detail TEXT
 );
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  link TEXT,
+  read_at TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id, created_at);
 `);
 
 export const getSetting = (key, fallback) => {

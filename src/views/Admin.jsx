@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Users, Car, PlusCircle, Settings, Check, X, Eye, FileCheck2, UserCheck, LayoutDashboard, Calculator, ScrollText } from 'lucide-react';
 import { useStore } from '../store.jsx';
 import { Btn, Badge, Card, Field, Input, inputCls, FileDrop, Modal, SectionTitle } from '../components/ui.jsx';
@@ -226,6 +226,11 @@ export default function Admin() {
   const { state } = useStore();
   const [tab, setTab] = useState('todo');
   const [sel, setSel] = useState(null);
+  useEffect(() => {
+    if (!state.live || !state.adminFocus) return;
+    setTab(state.adminFocus.tab || 'todo');
+    if (state.adminFocus.vid) setSel(state.adminFocus.vid);
+  }, [state.adminFocus, state.live]);
   const t = adminTodo(state);
   const go = (id, vid) => {
     if (vid) setSel(vid);

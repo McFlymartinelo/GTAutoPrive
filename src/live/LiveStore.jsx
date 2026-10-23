@@ -62,6 +62,7 @@ function toRequest(a) {
 export function LiveProvider({ children, onLogout }) {
   const [data, setData] = useState(null);
   const [route, setRoute] = useState({ name: 'showroom' });
+  const [adminFocus, setAdminFocus] = useState(null);
   const [toast, setToast] = useState(null);
   const notify = useCallback((msg, kind = 'ok') => setToast({ id: Date.now() + Math.random(), msg, kind }), []);
 
@@ -83,8 +84,19 @@ export function LiveProvider({ children, onLogout }) {
   const dispatch = useCallback(
     async (a) => {
       if (a.type === 'ROUTE') return setRoute(a.route);
+      if (a.type === 'ADMIN_FOCUS') return setAdminFocus({ tab: a.tab, vid: a.vid || null, n: Date.now() });
       if (a.type === 'NOTIFY') return notify(a.msg, a.kind);
       try {
+        if (a.type === 'MARK_NOTIF_READ') {
+          await api(`/notifications/${a.id}/read`, { method: 'POST' });
+          await refresh();
+          return true;
+        }
+        if (a.type === 'MARK_ALL_NOTIFS_READ') {
+          await api('/notifications/read-all', { method: 'POST' });
+          await refresh();
+          return true;
+        }
         if (a.type === 'ADD_PLEDGE') {
           const r = await api(`/vehicles/${a.vid}/pledge`, { method: 'POST', json: { amount: a.amount } });
           await refresh();
@@ -114,9 +126,9 @@ export function LiveProvider({ children, onLogout }) {
 
   const value = useMemo(() => {
     if (!data) return null;
-    const state = { ...data, route, toast, view: data.me.role === 'admin' ? 'admin' : 'client', activeUserId: data.me.id, candidateId: data.me.id };
+    const state = { ...data, route, toast, adminFocus, view: data.me.role === 'admin' ? 'admin' : 'client', activeUserId: data.me.id, candidateId: data.me.id };
     return { state, dispatch, me: data.me, candidate: data.me, notify };
-  }, [data, route, toast, dispatch, notify]);
+  }, [data, route, toast, adminFocus, dispatch, notify]);
 
   if (!value) return <div className="p-10 text-center text-zinc-400">Chargement…</div>;
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

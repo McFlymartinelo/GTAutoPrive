@@ -61,7 +61,19 @@ export function buildState(user) {
   const vehicles = me?.status === M.ACTIF || admin
     ? db.prepare('SELECT * FROM vehicles ORDER BY created_at DESC, id DESC').all().map((v) => vehicleOut(v, user))
     : [];
-  const base = { live: true, memberOffset: 0, vehicles, templates: getTemplates() };
+  const notifRows = db.prepare(`SELECT id, type, title, body, link, read_at, created_at FROM notifications
+    WHERE user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 40`).all(user.id);
+  const unread = db.prepare('SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND read_at IS NULL').get(user.id).c;
+  const notifications = notifRows.map((r) => ({
+    id: r.id,
+    type: r.type,
+    title: r.title,
+    body: r.body,
+    link: r.link ? JSON.parse(r.link) : null,
+    read: !!r.read_at,
+    createdAt: r.created_at,
+  }));
+  const base = { live: true, memberOffset: 0, vehicles, templates: getTemplates(), notifications, unread };
 
   if (admin) {
     const members = db.prepare('SELECT * FROM members ORDER BY created_at').all().map((m) => memberOut(m, { admin: true }));

@@ -3,6 +3,7 @@ import { Crown, LogOut } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useStore } from '../store.jsx';
 import { Toast } from '../components/ui.jsx';
+import { NotificationBell } from '../components/Notifications.jsx';
 import { M } from '../lib/calc.js';
 import AuthScreens from './AuthScreens.jsx';
 import { LiveProvider } from './LiveStore.jsx';
@@ -18,6 +19,7 @@ function Shell({ onLogout }) {
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2.5 sm:px-6">
           <div className="font-display flex items-center gap-2 text-sm font-semibold text-gold-300"><Crown size={16} /> GT Auto Privé {me.role === 'admin' && <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] uppercase text-red-300">Admin</span>}</div>
           <div className="flex items-center gap-3 text-xs text-zinc-400">
+            <NotificationBell />
             <span className="hidden sm:inline">{me.email}</span>
             <button onClick={onLogout} className="flex items-center gap-1 rounded-lg border border-ink-600 px-2.5 py-1.5 hover:border-gold-400 hover:text-white"><LogOut size={13} /> Déconnexion</button>
           </div>

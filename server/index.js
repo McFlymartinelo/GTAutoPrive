@@ -10,7 +10,8 @@ import {
   createSession, destroySession, loadUser, requireAuth, requireAdmin, requireMember, rateLimit,
 } from './auth.js';
 import { buildState } from './serialize.js';
-import { M, S, MAX_MEMBERS, render, charteVars, conventionVars } from '../src/lib/calc.js';
+import { notifyUsers, activeMemberUserIds, adminUserIds, participantUserIds, memberUserId } from './notify.js';
+import { M, S, MAX_MEMBERS, PLEDGE_PAY_DELAY, eur, render, charteVars, conventionVars } from '../src/lib/calc.js';
 
 const app = express();
 const uid = () => crypto.randomUUID();
@@ -113,6 +114,9 @@ const vehicleRow = (id) => {
   return v;
 };
 const fundedCents = (vid) => db.prepare('SELECT COALESCE(SUM(amount),0) AS s FROM pledges WHERE vehicle_id = ?').get(vid).s;
+const vLabel = (v) => `${v.marque} ${v.modele} (${v.id})`;
+const vehicleLink = (id) => ({ kind: 'vehicle', id });
+const adminVehicleLink = (id) => ({ kind: 'admin', tab: 'vehicles', vid: id });
 // Forme « front » (euros) d'un véhicule/membre pour réutiliser le moteur de templates partagé.
 const vForTpl = (v) => ({ ...v, prixAchat: v.prix_achat / 100, margeVisee: v.marge_visee / 100, pctRoyalties: v.pct_royalties });
 const activeMember = (req) => {
@@ -158,8 +162,16 @@ api.post('/requests', rateLimit('request', 10, 3_600_000), h(async (req, res) =>
   const prenom = str(req.body?.prenom, 'prénom', 100);
   const parrain = str(req.body?.parrain, 'parrain', 200);
   const code = newCode();
-  db.prepare('INSERT INTO members (id, nom, prenom, parrain, status, dossier_code, created_at) VALUES (?,?,?,?,?,?,?)')
-    .run(uid(), nom, prenom, parrain, M.ATT, code, now());
+  tx(() => {
+    db.prepare('INSERT INTO members (id, nom, prenom, parrain, status, dossier_code, created_at) VALUES (?,?,?,?,?,?,?)')
+      .run(uid(), nom, prenom, parrain, M.ATT, code, now());
+    notifyUsers(adminUserIds(), {
+      type: 'membership_request',
+      title: 'Nouvelle candidature',
+      body: `${prenom} ${nom}, parrainé par ${parrain}.`,
+      link: { kind: 'admin', tab: 'members' },
+    });
+  });
   audit(null, 'request_created', `${prenom} ${nom} / parrain ${parrain}`);
   res.json({ code });
 }));
@@ -204,6 +216,17 @@ api.post('/requests/complete', rateLimit('complete', 10, 3_600_000), upload.fiel
 
 // ---------- État ----------
 api.get('/state', requireAuth, h(async (req, res) => res.json(buildState(req.user))));
+
+api.post('/notifications/read-all', requireAuth, h(async (req, res) => {
+  db.prepare('UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL').run(now(), req.user.id);
+  res.json({ ok: true });
+}));
+api.post('/notifications/:id/read', requireAuth, h(async (req, res) => {
+  const owned = db.prepare('SELECT read_at FROM notifications WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+  if (!owned) throw new HttpError(404, 'Notification introuvable.');
+  if (!owned.read_at) db.prepare('UPDATE notifications SET read_at = ? WHERE id = ?').run(now(), req.params.id);
+  res.json({ ok: true });
+}));
 
 // ---------- Fichiers ----------
 api.get('/files/:id', requireAuth, h(async (req, res) => {
@@ -258,7 +281,35 @@ api.post('/vehicles/:id/pledge', requireMember, h(async (req, res) => {
     else db.prepare('INSERT INTO pledges (vehicle_id, member_id, amount) VALUES (?,?,?)').run(v.id, m.id, amt);
     const full = fundedCents(v.id) >= v.prix_achat;
     if (full) db.prepare('UPDATE vehicles SET status = ? WHERE id = ?').run(S.F100, v.id);
-    return { amount: amt / 100, full, updated: !!existing };
+    const updated = !!existing;
+    const label = vLabel(v);
+    notifyUsers([m.user_id], {
+      type: 'pledge_recorded',
+      title: updated ? 'Promesse modifiée' : 'Promesse enregistrée',
+      body: `${eur(amt / 100)} sur ${label}.`,
+      link: vehicleLink(v.id),
+    });
+    notifyUsers(adminUserIds(), {
+      type: 'pledge_recorded',
+      title: updated ? 'Promesse modifiée' : 'Nouvelle promesse',
+      body: `${m.prenom} ${m.nom} — ${eur(amt / 100)} sur ${label}.`,
+      link: adminVehicleLink(v.id),
+    });
+    if (full) {
+      notifyUsers(participantUserIds(v.id), {
+        type: 'financing_complete',
+        title: 'Financement terminé',
+        body: `${label} est financé à 100 %. Signez la convention et virez les fonds sous ${PLEDGE_PAY_DELAY}.`,
+        link: vehicleLink(v.id),
+      });
+      notifyUsers(adminUserIds(), {
+        type: 'financing_complete',
+        title: 'Financement à 100 %',
+        body: `${label} — conventions et virements en attente.`,
+        link: adminVehicleLink(v.id),
+      });
+    }
+    return { amount: amt / 100, full, updated };
   });
   audit(req.user.id, 'pledge', `${req.params.id} ${result.amount}`);
   res.json(result);
@@ -272,7 +323,15 @@ api.post('/vehicles/:id/sign', requireMember, h(async (req, res) => {
   if (p.contract_signed) throw new HttpError(409, 'Convention déjà signée.');
   const { signature, meta } = checkSignature(req);
   const text = render(getTemplates().convention, conventionVars(m, vForTpl(v), p.amount / 100));
-  db.prepare('UPDATE pledges SET contract_signed=1, signed_at=?, signature=?, contract_text=? WHERE vehicle_id=? AND member_id=?').run(now(), signature, text + `\n\n[${meta}]`, v.id, m.id);
+  tx(() => {
+    db.prepare('UPDATE pledges SET contract_signed=1, signed_at=?, signature=?, contract_text=? WHERE vehicle_id=? AND member_id=?').run(now(), signature, text + `\n\n[${meta}]`, v.id, m.id);
+    notifyUsers(adminUserIds(), {
+      type: 'convention_signed',
+      title: 'Convention signée',
+      body: `${m.prenom} ${m.nom} a signé la convention de ${vLabel(v)}.`,
+      link: adminVehicleLink(v.id),
+    });
+  });
   audit(req.user.id, 'convention_signed', v.id);
   res.json({ ok: true });
 }));
@@ -284,7 +343,15 @@ api.post('/vehicles/:id/declare', requireMember, h(async (req, res) => {
   if (!p || v.status !== S.F100) throw new HttpError(409, 'Opération impossible.');
   if (!p.contract_signed) throw new HttpError(409, 'Signez d’abord la convention.');
   if (p.payment !== 'EN_ATTENTE') throw new HttpError(409, 'Virement déjà déclaré.');
-  db.prepare('UPDATE pledges SET payment = ? WHERE vehicle_id = ? AND member_id = ?').run('DECLARE', v.id, m.id);
+  tx(() => {
+    db.prepare('UPDATE pledges SET payment = ? WHERE vehicle_id = ? AND member_id = ?').run('DECLARE', v.id, m.id);
+    notifyUsers(adminUserIds(), {
+      type: 'payment_declared',
+      title: 'Virement déclaré',
+      body: `${m.prenom} ${m.nom} a déclaré son virement pour ${vLabel(v)}.`,
+      link: adminVehicleLink(v.id),
+    });
+  });
   audit(req.user.id, 'payment_declared', v.id);
   res.json({ ok: true });
 }));
@@ -330,6 +397,12 @@ admin.post('/vehicles', upload.fields([0, 1, 2].map((i) => ({ name: `photo${i}`,
     });
     db.prepare(`INSERT INTO vehicles (id, marque, modele, finition, motorisation, annee, km, photos, prix_achat, marge_visee, pct_royalties, infos, status, created_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(vid, data.marque, data.modele, data.finition, data.motorisation, data.annee, data.km, JSON.stringify(photos), data.prix, data.marge, data.pct, data.infos, S.FIN, now());
+    notifyUsers(activeMemberUserIds(), {
+      type: 'vehicle_online',
+      title: 'Nouvelle voiture en ligne',
+      body: `${data.marque} ${data.modele} (${vid}) est ouverte aux promesses.`,
+      link: vehicleLink(vid),
+    });
     return vid;
   });
   audit(req.user.id, 'vehicle_created', id);
@@ -343,7 +416,24 @@ admin.post('/vehicles/:id/confirm/:mid', h(async (req, res) => {
   if (!p) throw new HttpError(404, 'Promesse introuvable.');
   if (!p.contract_signed) throw new HttpError(409, 'La convention de cet investisseur n’est pas signée : réception non confirmable.');
   if (p.payment === 'RECU') throw new HttpError(409, 'Réception déjà confirmée.');
-  db.prepare('UPDATE pledges SET payment = ? WHERE vehicle_id = ? AND member_id = ?').run('RECU', v.id, p.member_id);
+  tx(() => {
+    db.prepare('UPDATE pledges SET payment = ? WHERE vehicle_id = ? AND member_id = ?').run('RECU', v.id, p.member_id);
+    notifyUsers([memberUserId(p.member_id)], {
+      type: 'participation_validated',
+      title: 'Participation validée',
+      body: `Réception du virement confirmée pour ${vLabel(v)}.`,
+      link: vehicleLink(v.id),
+    });
+    const ps = db.prepare('SELECT contract_signed, payment FROM pledges WHERE vehicle_id = ?').all(v.id);
+    if (ps.length && ps.every((row) => row.contract_signed && row.payment === 'RECU')) {
+      notifyUsers(adminUserIds(req.user.id), {
+        type: 'ready_to_sell',
+        title: 'Prêt à commercialiser',
+        body: `${vLabel(v)} — toutes les conventions sont signées et tous les virements sont reçus.`,
+        link: adminVehicleLink(v.id),
+      });
+    }
+  });
   audit(req.user.id, 'payment_confirmed', `${v.id} ${req.params.mid}`);
   res.json({ ok: true });
 }));
@@ -443,7 +533,15 @@ admin.post('/vehicles/:id/commercialiser', h(async (req, res) => {
   const vente = money(req.body?.valeurVente, 'valeur de vente', { min: 1 });
   const ps = db.prepare('SELECT * FROM pledges WHERE vehicle_id = ?').all(v.id);
   if (!ps.length || !ps.every((p) => p.contract_signed && p.payment === 'RECU')) throw new HttpError(409, 'Toutes les conventions doivent être signées et tous les virements reçus.');
-  db.prepare('UPDATE vehicles SET status=?, valeur_vente=?, date_com=? WHERE id=?').run(S.COM, vente, now(), v.id);
+  tx(() => {
+    db.prepare('UPDATE vehicles SET status=?, valeur_vente=?, date_com=? WHERE id=?').run(S.COM, vente, now(), v.id);
+    notifyUsers(participantUserIds(v.id), {
+      type: 'vehicle_commercialised',
+      title: 'Véhicule commercialisé',
+      body: `${vLabel(v)} est mis en vente.`,
+      link: vehicleLink(v.id),
+    });
+  });
   audit(req.user.id, 'commercialise', v.id);
   res.json({ ok: true });
 }));
@@ -460,6 +558,12 @@ admin.post('/vehicles/:id/close', upload.fields([{ name: 'factures', maxCount: 1
     const jours = Math.max(1, Math.round((Date.now() - new Date(v.date_com)) / 86_400_000));
     db.prepare('UPDATE vehicles SET status=?, prix_vente_reel=?, marge_finale=?, jours_rotation=?, doc_factures=?, doc_vente=? WHERE id=?')
       .run(S.VENDU, prix, marge, jours, fact, vente, v.id);
+    notifyUsers(participantUserIds(v.id), {
+      type: 'vehicle_sold',
+      title: 'Vente clôturée',
+      body: `${vLabel(v)} est vendu. Votre répartition est disponible sur la fiche.`,
+      link: vehicleLink(v.id),
+    });
   });
   audit(req.user.id, 'vehicle_closed', v.id);
   res.json({ ok: true });
