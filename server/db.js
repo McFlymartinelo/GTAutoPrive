@@ -86,6 +86,15 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id, created_at);
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_push_user ON push_subscriptions (user_id);
 `);
 
 export const getSetting = (key, fallback) => {
@@ -105,14 +114,32 @@ export const getTemplates = () => ({
 export const audit = (userId, action, detail = '') =>
   db.prepare('INSERT INTO audit (ts, user_id, action, detail) VALUES (?, ?, ?, ?)').run(new Date().toISOString(), userId, action, String(detail).slice(0, 500));
 
+// Travaux à lancer seulement après COMMIT (envoi push, etc.). Annulés si la transaction échoue.
+const afterCommit = [];
+let txDepth = 0;
+export function onCommit(fn) {
+  if (txDepth === 0) {
+    Promise.resolve().then(fn).catch((e) => console.error(e));
+    return;
+  }
+  afterCommit.push(fn);
+}
+
 export function tx(fn) {
   db.exec('BEGIN IMMEDIATE');
+  txDepth += 1;
+  const start = afterCommit.length;
   try {
     const r = fn();
     db.exec('COMMIT');
+    txDepth -= 1;
+    const jobs = afterCommit.splice(start);
+    for (const job of jobs) Promise.resolve().then(job).catch((e) => console.error(e));
     return r;
   } catch (e) {
-    db.exec('ROLLBACK');
+    try { db.exec('ROLLBACK'); } catch { /* déjà annulée */ }
+    txDepth -= 1;
+    afterCommit.splice(start);
     throw e;
   }
 }

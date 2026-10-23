@@ -10,7 +10,7 @@ import {
   createSession, destroySession, loadUser, requireAuth, requireAdmin, requireMember, rateLimit,
 } from './auth.js';
 import { buildState } from './serialize.js';
-import { notifyUsers, activeMemberUserIds, adminUserIds, participantUserIds, memberUserId } from './notify.js';
+import { notifyUsers, activeMemberUserIds, adminUserIds, participantUserIds, memberUserId, vapidPublicKey } from './notify.js';
 import { M, S, MAX_MEMBERS, PLEDGE_PAY_DELAY, eur, render, charteVars, conventionVars } from '../src/lib/calc.js';
 
 const app = express();
@@ -225,6 +225,25 @@ api.post('/notifications/:id/read', requireAuth, h(async (req, res) => {
   const owned = db.prepare('SELECT read_at FROM notifications WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
   if (!owned) throw new HttpError(404, 'Notification introuvable.');
   if (!owned.read_at) db.prepare('UPDATE notifications SET read_at = ? WHERE id = ?').run(now(), req.params.id);
+  res.json({ ok: true });
+}));
+
+api.get('/push/key', requireAuth, h(async (req, res) => {
+  res.json({ publicKey: vapidPublicKey() });
+}));
+api.post('/push/subscribe', requireAuth, h(async (req, res) => {
+  const endpoint = String(req.body?.endpoint || '');
+  const p256dh = String(req.body?.keys?.p256dh || '');
+  const authKey = String(req.body?.keys?.auth || '');
+  if (!/^https:\/\/\S{10,2000}$/.test(endpoint)) throw new HttpError(400, 'Abonnement invalide.');
+  if (p256dh.length < 16 || p256dh.length > 256 || authKey.length < 8 || authKey.length > 256) throw new HttpError(400, 'Clés d’abonnement invalides.');
+  db.prepare(`INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, created_at) VALUES (?,?,?,?,?,?)
+    ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth`)
+    .run(uid(), req.user.id, endpoint, p256dh, authKey, now());
+  res.json({ ok: true });
+}));
+api.post('/push/unsubscribe', requireAuth, h(async (req, res) => {
+  db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id = ?').run(String(req.body?.endpoint || ''), req.user.id);
   res.json({ ok: true });
 }));
 

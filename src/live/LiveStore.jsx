@@ -81,6 +81,33 @@ export function LiveProvider({ children, onLogout }) {
     return () => clearInterval(id);
   }, [refresh]);
 
+  useEffect(() => {
+    if (!data) return;
+    const q = new URLSearchParams(location.search);
+    const open = q.get('open');
+    if (!open) return;
+    if (open === 'vehicle' && q.get('id')) setRoute({ name: 'vehicle', id: q.get('id') });
+    if (open === 'admin' && data.me?.role === 'admin') setAdminFocus({ tab: q.get('tab') || 'todo', vid: q.get('vid'), n: Date.now() });
+    history.replaceState(null, '', location.pathname + location.hash);
+  }, [data]);
+
+  useEffect(() => {
+    if (!navigator.serviceWorker) return undefined;
+    const onMsg = (e) => {
+      if (e.origin !== location.origin) return;
+      if (e.data?.type === 'notifications-updated') {
+        refresh();
+        return;
+      }
+      if (e.data?.type !== 'notification-click') return;
+      const link = e.data.link;
+      if (link?.kind === 'admin' && data?.me?.role === 'admin') setAdminFocus({ tab: link.tab, vid: link.vid || null, n: Date.now() });
+      else if (link?.kind === 'vehicle' && link.id) setRoute({ name: 'vehicle', id: link.id });
+    };
+    navigator.serviceWorker.addEventListener('message', onMsg);
+    return () => navigator.serviceWorker.removeEventListener('message', onMsg);
+  }, [refresh, data]);
+
   const dispatch = useCallback(
     async (a) => {
       if (a.type === 'ROUTE') return setRoute(a.route);
