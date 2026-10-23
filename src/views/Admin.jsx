@@ -7,6 +7,7 @@ import AdminTodo, { adminTodo } from './AdminTodo.jsx';
 import AdminSimulator from './AdminSimulator.jsx';
 import AdminAudit from './AdminAudit.jsx';
 import { useConfirm } from '../components/Confirm.jsx';
+import MarginPreview from '../components/MarginPreview.jsx';
 import { M, MAX_MEMBERS, dateFr } from '../lib/calc.js';
 import { carSvg } from '../lib/placeholder.js';
 
@@ -184,6 +185,7 @@ function NewVehicle() {
           <Field label="Marge nette HT visée (€)"><Input type="number" value={f.margeVisee} onChange={set('margeVisee')} /></Field>
           <Field label="% de marge alloué aux royalties"><Input type="number" min="0" max="100" value={f.pctRoyalties} onChange={set('pctRoyalties')} /></Field>
         </div>
+        <MarginPreview prixAchat={+f.prixAchat} marge={+f.margeVisee || 0} pctRoyalties={+f.pctRoyalties || 0} onApplyPct={(p) => setF({ ...f, pctRoyalties: String(p) })} />
         <Field label="Infos complémentaires (visibles sur la fiche)"><textarea rows={4} className={inputCls} value={f.infos} onChange={set('infos')} placeholder="État mécanique, historique, stratégie de revente…" /></Field>
       </Card>
       <Btn type="submit" size="lg" disabled={!ok}>Créer le véhicule et ouvrir le financement</Btn>

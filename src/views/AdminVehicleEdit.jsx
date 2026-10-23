@@ -3,6 +3,7 @@ import { Lock, Pencil } from 'lucide-react';
 import { useStore } from '../store.jsx';
 import { Btn, CarImg, Field, FileDrop, Input, Modal, inputCls } from '../components/ui.jsx';
 import { label } from '../components/vehicle.jsx';
+import MarginPreview from '../components/MarginPreview.jsx';
 
 const isStored = (p) => p.startsWith('data:') || p.startsWith('/api/files/');
 
@@ -86,6 +87,7 @@ export default function AdminVehicleEdit({ v, onClose }) {
             {lockTerms && <Locked why="Verrouillé : conventions signées." />}
           </Field>
         </div>
+        <MarginPreview prixAchat={+f.prixAchat} marge={+f.margeVisee || 0} pctRoyalties={+f.pctRoyalties || 0} onApplyPct={lockTerms ? undefined : (p) => setF({ ...f, pctRoyalties: String(p) })} />
         <Field label="Infos complémentaires (visibles sur la fiche)">
           <textarea rows={4} className={inputCls} value={f.infos} onChange={set('infos')} />
         </Field>
